@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Marketplace Listing Check</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Human-reviewed risk signal</p>
+      <h1>Marketplace Listing Check</h1>
+      <p class="intro">Review a listing for possible warning signs. The tool supports your judgement; it does not make decisions about listings.</p>
+      <p class="privacy-note">Listing text is processed locally and not written to disk. Human review decisions are saved in a local database; this demo has no reviewer authentication. Avoid entering personal information.</p>
+      <details class="transparency">
+        <summary>Transparency and data use</summary>
+        <dl class="transparency-facts">
+          <dt>Model</dt>
+          <dd><code>{{ model_id }}</code>, a general-purpose zero-shot classifier. It is not specifically trained for marketplace fraud. Model weights may download from Hugging Face on first use; listing text is processed by this app locally.</dd>
+          <dt>Decision policy</dt>
+          <dd>Scores at or below {{ review_lower_percent }} are labeled likely legitimate; scores above {{ review_lower_percent }} and below {{ review_upper_percent }} require human review; scores at or above {{ fraud_threshold_percent }} are flagged as potentially fraudulent. These thresholds are provisional, not validated or calibrated.</dd>
+          <dt>Explanation</dt>
+          <dd>The Explain result button reruns the same classifier with up to three text excerpts omitted and compares scores. This is a local sensitivity check, not access to the model's internal reasoning or proof of causation.</dd>
+          <dt>Data and retention</dt>
+          <dd>The app does not write listing submissions to disk or send them to a remote inference API. Text is held in server memory while an asynchronous job runs. Its job record expires after {{ job_retention_minutes }} minutes and is removed on the next request; if no later request arrives, it can remain in memory longer until the app restarts. The input limit is {{ input_limit }} characters.</dd>
+          <dt>Human control</dt>
+          <dd>The app never removes a listing. A reviewer can confirm the warning, mark the listing legitimate, or escalate it. The selected outcome, model result, timestamp, and optional reviewer ID and rationale are saved in a local SQLite database. The listing text is not included. This demo has no login or reviewer authentication; stored decisions do not automatically retrain the model.</dd>
+          <dt>Limitations</dt>
+          <dd>The score is not a probability or accuracy measure. This prototype has not been validated for accuracy, fairness, or robustness on representative marketplace data.</dd>
+        </dl>
+      </details>
+      <form id="listing-form">
+        <label for="listing-text">Listing text</label>
+        <textarea id="listing-text" name="text" maxlength="5000" required
+          placeholder="Paste the listing description here..." rows="8"></textarea>
+        <div class="form-meta">
+          <span id="character-count">0 / 5000 characters</span>
+          <button type="button" class="text-button" id="clear-button">Clear</button>
+        </div>
+        <div class="actions">
+          <button type="submit" id="analyze-button">Analyze listing</button>
+        </div>
+      </form>
+      <div class="sample-listings" aria-label="Sample listings">
+        <span>Try a sample:</span>
+        <button type="button" class="text-button" data-sample="scam">Suspicious payment request</button>
+        <button type="button" class="text-button" data-sample="legitimate">Ordinary sale</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <section id="result" aria-live="polite" hidden>
+        <p class="result-kicker">Model assessment</p>
+        <h2 id="result-label"></h2>
+        <p class="score-line">Uncalibrated fraud-risk score: <strong id="fraud-score"></strong></p>
+        <p id="threshold-note" class="explanation-note"></p>
+        <div class="actions">
+          <button type="button" id="explain-button" disabled>Explain result</button>
+        </div>
+        <section id="explanation-panel" aria-live="polite" hidden>
+          <h3>What influenced this result?</h3>
+          <p class="explanation-note">The same classifier is rerun with up to three text excerpts omitted. If removing an excerpt lowers the score, that text raised the score; if removing it raises the score, the text lowered it. This is a local sensitivity check, not hidden model reasoning.</p>
+          <p id="explanation-status" class="explanation-note" role="status" aria-live="polite"></p>
+          <p id="explanation-summary" class="explanation-note"></p>
+          <h4>Text that raised the fraud-risk score</h4>
+          <ol id="risk-raising-features" class="explanation-feature-list"></ol>
+          <h4>Text that lowered the fraud-risk score</h4>
+          <ol id="risk-lowering-features" class="explanation-feature-list"></ol>
+        </section>
+        <h3>Closest model-matched categories</h3>
+        <p class="explanation-note">These are similarity matches, not evidence that a scam occurred.</p>
+        <ol id="ranked-categories"></ol>
+        <p class="model-name">Model: <span id="model-name"></span></p>
+        <p id="disclaimer"></p>
+        <section class="human-review" aria-labelledby="human-review-title">
+          <h3 id="human-review-title">Human review decision</h3>
+          <p>Review the listing and explanation, then record your final decision. This does not trigger an action on the marketplace.</p>
+          <p id="review-record-status" class="explanation-note" role="status" aria-live="polite">Awaiting a human decision.</p>
+          <form id="human-review-form">
+            <label for="review-decision">Decision</label>
+            <select id="review-decision" name="decision" required>
+              <option value="confirmed_suspicious">Confirm suspicious</option>
+              <option value="marked_legitimate">Mark as legitimate</option>
+              <option value="escalated">Escalate for more evidence</option>
+            </select>
+            <label for="reviewer-id">Reviewer ID (optional)</label>
+            <input id="reviewer-id" name="reviewer_id" maxlength="80" autocomplete="off">
+            <label for="review-rationale">Rationale (optional, max 500 characters)</label>
+            <textarea id="review-rationale" name="rationale" maxlength="500" rows="3"
+              placeholder="Briefly note what evidence informed your decision."></textarea>
+            <button type="submit" id="record-review-button">Record human decision</button>
+          </form>
+          <p class="feedback-note">The database stores the decision and model metadata, not the listing text. Do not enter personal data in reviewer IDs or rationale.</p>
+        </section>
+        <div class="feedback" id="feedback">
+          <p>Did this result help you review the listing?</p>
+          <div class="actions">
+            <button type="button" class="secondary-button" data-feedback="helpful">Yes</button>
+            <button type="button" class="secondary-button" data-feedback="not-helpful">No</button>
+          </div>
+          <p class="feedback-note">Feedback stays in this page, is not saved, and does not retrain the model.</p>
+          <p id="feedback-status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+    <script>
+      const form = document.querySelector("#listing-form");
+      const status = document.querySelector("#status");
+      const result = document.querySelector("#result");
+      const listingText = document.querySelector("#listing-text");
+      const analyzeButton = document.querySelector("#analyze-button");
+      const explainButton = document.querySelector("#explain-button");
+      const explanationPanel = document.querySelector("#explanation-panel");
+      const humanReviewForm = document.querySelector("#human-review-form");
+      const recordReviewButton = document.querySelector("#record-review-button");
+      const reviewRecordStatus = document.querySelector("#review-record-status");
+      const characterCount = document.querySelector("#character-count");
+      const feedbackStatus = document.querySelector("#feedback-status");
+      let currentJobId = null;
+      let dataThreshold = 0.5;
+
+      const samples = {
+        scam: "PS5 LISTING: This is an advance payment scam. Pay a GBP 50 deposit by bank transfer now using my courier payment link, then send your bank verification code. I will deliver the console after payment.",
+        legitimate: "Used bicycle in good condition. Collection near the town centre. View it before buying; payment on collection."
+      };
+
+      function updateCharacterCount() {
+        characterCount.textContent = `${listingText.value.length} / 5000 characters`;
+      }
+
+      async function readJsonResponse(response) {
+        const responseText = await response.text();
+        let data;
+        try {
+          data = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          throw new Error(
+            `The server returned an unreadable response (HTTP ${response.status}). Check the Flask server log.`
+          );
+        }
+        if (!data || typeof data !== "object") {
+          throw new Error(
+            `The server returned an empty response (HTTP ${response.status}). Check that the Flask server is running.`
+          );
+        }
+        return data;
+      }
+
+      listingText.addEventListener("input", updateCharacterCount);
+
+      document.querySelectorAll("[data-sample]").forEach((button) => {
+        button.addEventListener("click", () => {
+          listingText.value = samples[button.dataset.sample];
+          updateCharacterCount();
+          listingText.focus();
+        });
+      });
+
+      document.querySelector("#clear-button").addEventListener("click", () => {
+        form.reset();
+        updateCharacterCount();
+        result.hidden = true;
+        status.textContent = "";
+        currentJobId = null;
+        explainButton.disabled = true;
+        explanationPanel.hidden = true;
+        humanReviewForm.reset();
+        reviewRecordStatus.textContent = "Awaiting a human decision.";
+        listingText.focus();
+      });
+
+      document.querySelectorAll("[data-feedback]").forEach((button) => {
+        button.addEventListener("click", () => {
+          feedbackStatus.textContent = "Thanks. Your response is visible only in this page session.";
+          document.querySelectorAll("[data-feedback]").forEach((option) => {
+            option.disabled = true;
+          });
+        });
+      });
+
+      humanReviewForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!currentJobId) return;
+        recordReviewButton.disabled = true;
+        reviewRecordStatus.textContent = "Saving human decision...";
+        try {
+          const response = await fetch(
+            `/api/analyze/${encodeURIComponent(currentJobId)}/review`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(Object.fromEntries(new FormData(humanReviewForm)))
+            }
+          );
+          const data = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(data.error || `Review could not be saved (HTTP ${response.status}).`);
+          }
+          const decisionNames = {
+            confirmed_suspicious: "confirmed suspicious",
+            marked_legitimate: "marked legitimate",
+            escalated: "escalated for more evidence"
+          };
+          reviewRecordStatus.textContent =
+            `Decision ${decisionNames[data.decision]} recorded. Review ID: ${data.review_id}.`;
+        } catch (error) {
+          reviewRecordStatus.textContent = error.message;
+        } finally {
+          recordReviewButton.disabled = false;
+        }
+      });
+
+      explainButton.addEventListener("click", async () => {
+        if (!currentJobId) return;
+        explainButton.disabled = true;
+        explanationPanel.hidden = false;
+        const explanationStatus = document.querySelector("#explanation-status");
+        const explanationSummary = document.querySelector("#explanation-summary");
+        const riskRaisingFeatures = document.querySelector("#risk-raising-features");
+        const riskLoweringFeatures = document.querySelector("#risk-lowering-features");
+        explanationStatus.textContent = "Starting model explanation...";
+        explanationSummary.textContent = "";
+        riskRaisingFeatures.replaceChildren();
+        riskLoweringFeatures.replaceChildren();
+
+        try {
+          const startResponse = await fetch(
+            `/api/analyze/${encodeURIComponent(currentJobId)}/explain`,
+            { method: "POST" }
+          );
+          const started = await readJsonResponse(startResponse);
+          if (!startResponse.ok) {
+            throw new Error(started.error || `Explanation failed (HTTP ${startResponse.status}).`);
+          }
+
+          const timeoutAt = Date.now() + 300000;
+          let explanation = null;
+          while (Date.now() < timeoutAt) {
+            explanationStatus.textContent = "Checking how short excerpts affect the same model's score...";
+            await new Promise((resolve) => setTimeout(resolve, 750));
+            const pollResponse = await fetch(
+              `/api/analyze/${encodeURIComponent(currentJobId)}/explain`
+            );
+            const pollData = await readJsonResponse(pollResponse);
+            if (pollResponse.status === 202 && pollData.status === "processing") continue;
+            if (!pollResponse.ok) {
+              throw new Error(pollData.error || `Explanation failed (HTTP ${pollResponse.status}).`);
+            }
+            explanation = pollData.explanation;
+            break;
+          }
+          if (!explanation) throw new Error("Explanation timed out. Try again.");
+          if (!explanation.available) {
+            explanationStatus.textContent = explanation.message;
+            return;
+          }
+
+          explanationStatus.textContent = `${explanation.method} using the same classifier.`;
+          explanationSummary.textContent = explanation.summary || explanation.message ||
+            `Original fraud-risk score: ${(explanation.fraud_score * 100).toFixed(1)}%.`;
+          const raised = [];
+          const lowered = [];
+          explanation.features.forEach((feature) => {
+            const item = document.createElement("li");
+            const categoryEffect = document.createElement("p");
+            const originalScore = explanation.fraud_score;
+            const omittedScore = feature.score_without_text;
+            if (feature.contribution > 0) {
+              item.textContent = `"${feature.text}" raised the score: removing it lowered the score from ${(originalScore * 100).toFixed(1)}% to ${(omittedScore * 100).toFixed(1)}%.`;
+              raised.push(item);
+            } else if (feature.contribution < 0) {
+              item.textContent = `"${feature.text}" lowered the score: removing it raised the score from ${(originalScore * 100).toFixed(1)}% to ${(omittedScore * 100).toFixed(1)}%.`;
+              lowered.push(item);
+            } else {
+              item.textContent = `Removing "${feature.text}" did not change the score.`;
+              lowered.push(item);
+            }
+            if (feature.flag_without_text !== (originalScore >= dataThreshold)) {
+              item.textContent += feature.flag_without_text
+                ? " Without this excerpt, the model would flag the listing."
+                : " Without this excerpt, the model would not flag the listing.";
+            }
+            if (feature.review_required_without_text !== explanation.review_required) {
+              item.textContent += feature.review_required_without_text
+                ? " Without this excerpt, the score would require human review."
+                : " Without this excerpt, the score would not require human review.";
+            }
+            categoryEffect.className = "feature-category-effect";
+            const categoryDirection = feature.category_contribution >= 0 ? "raised" : "lowered";
+            categoryEffect.textContent = `Most affected category: ${feature.category} (${categoryDirection} by ${(Math.abs(feature.category_contribution) * 100).toFixed(1)} percentage points).`;
+            item.append(categoryEffect);
+          });
+          riskRaisingFeatures.replaceChildren(...raised);
+          riskLoweringFeatures.replaceChildren(...lowered);
+        } catch (error) {
+          explanationStatus.textContent = error.message;
+        } finally {
+          explainButton.disabled = false;
+        }
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "Starting analysis...";
+        analyzeButton.disabled = true;
+        explainButton.disabled = true;
+        explanationPanel.hidden = true;
+        humanReviewForm.reset();
+        reviewRecordStatus.textContent = "Awaiting a human decision.";
+        currentJobId = null;
+        dataThreshold = 0.5;
+        result.hidden = true;
+        try {
+          const queueResponse = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: form.elements.text.value })
+          });
+          const queued = await readJsonResponse(queueResponse);
+          if (!queueResponse.ok) {
+            throw new Error(queued.error || `Analysis failed (HTTP ${queueResponse.status}).`);
+          }
+          if (!queued.job_id) throw new Error("The server did not return an analysis job ID.");
+
+          const timeoutAt = Date.now() + 300000;
+          let data = null;
+          while (Date.now() < timeoutAt) {
+            status.textContent = "The model is processing the listing. The first analysis may take longer.";
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            const pollResponse = await fetch(`/api/analyze/${encodeURIComponent(queued.job_id)}`);
+            const pollData = await readJsonResponse(pollResponse);
+            if (pollResponse.status === 202 && pollData.status === "processing") continue;
+            if (!pollResponse.ok) {
+              throw new Error(pollData.error || `Analysis failed (HTTP ${pollResponse.status}).`);
+            }
+            data = pollData;
+            break;
+          }
+          if (!data) throw new Error("Analysis timed out. Check the Flask server log and try again.");
+
+          document.querySelector("#result-label").textContent =
+            data.label === "human_review_required"
+              ? "Human review required"
+              : data.label === "potentially_fraudulent"
+                ? "Potential warning signs"
+                : "No strong warning signs detected";
+          document.querySelector("#fraud-score").textContent =
+            `${(data.fraud_score * 100).toFixed(1)}%`;
+          document.querySelector("#threshold-note").textContent =
+            `Scores above ${(data.human_review_thresholds.lower_exclusive * 100).toFixed(0)}% and below ${(data.human_review_thresholds.upper_exclusive * 100).toFixed(0)}% require human review. Warning label cutoff: ${(data.threshold * 100).toFixed(0)}% (provisional).`;
+          currentJobId = queued.job_id;
+          dataThreshold = data.threshold;
+          document.querySelector("#model-name").textContent = data.model;
+          document.querySelector("#disclaimer").textContent = data.disclaimer;
+          explanationPanel.hidden = true;
+          explainButton.disabled = false;
+          const categories = document.querySelector("#ranked-categories");
+          categories.replaceChildren(...data.ranked_categories.map((category) => {
+            const item = document.createElement("li");
+            item.textContent = `${category.label} (${(category.score * 100).toFixed(1)}%)`;
+            return item;
+          }));
+          feedbackStatus.textContent = "";
+          document.querySelectorAll("[data-feedback]").forEach((button) => {
+            button.disabled = false;
+          });
+          result.hidden = false;
+          status.textContent = "";
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          analyzeButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

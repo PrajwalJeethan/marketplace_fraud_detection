@@ -1,0 +1,4 @@
+huggingface_hub>=0.27,<2
+Flask>=3.0,<4
+transformers>=4.44,<5
+torch>=2.2
