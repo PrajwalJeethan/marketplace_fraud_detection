@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Transparency and Data Use</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="/">Marketplace Check</a>
+        <div class="nav-links">
+          <a href="/analysis">Analysis</a>
+          <a href="/evaluation">Evaluation</a>
+          <a href="/study-summary">Study summary</a>
+          <a class="active" href="/transparency" aria-current="page">Transparency</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Human-reviewed risk signal</p>
+      <h1>Transparency and Data Use</h1>
+      <dl class="transparency-facts">
+        <dt>Model</dt>
+        <dd><code>{{ model_id }}</code>, a general-purpose zero-shot classifier. It is not specifically trained for marketplace fraud.</dd>
+        <dt>Decision policy</dt>
+        <dd>Scores at or below {{ review_lower_percent }} are labeled likely legitimate; scores above {{ review_lower_percent }} and below {{ review_upper_percent }} require human review; scores at or above {{ fraud_threshold_percent }} are flagged as potentially fraudulent.</dd>
+        <dt>Explanation</dt>
+        <dd>The Explain result check reruns the same classifier with up to three text excerpts omitted. It is a sensitivity check, not access to hidden model reasoning.</dd>
+        <dt>Data and retention</dt>
+        <dd>Listing text is held in server memory while an asynchronous job runs and is not written to disk. Job records expire after {{ job_retention_minutes }} minutes. The input limit is {{ input_limit }} characters.</dd>
+        <dt>Human control</dt>
+        <dd>The app never removes a listing. Review decisions, model metadata, and optional reviewer notes are saved locally. The listing text is not included.</dd>
+        <dt>Limitations</dt>
+        <dd>The score is not a calibrated probability or accuracy measure. This prototype has not been validated on representative marketplace data.</dd>
+      </dl>
+    </main>
+  </body>
+</html>

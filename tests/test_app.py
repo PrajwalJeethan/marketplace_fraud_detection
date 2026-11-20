@@ -63,6 +63,20 @@ class MarketplaceAppTests(unittest.TestCase):
         self.assertIn(b"Record human decision", response.data)
         self.assertNotIn(b"SHAP", response.data)
 
+    def test_evaluation_page_renders_required_five_point_radio_groups(self):
+        response = self.client.get("/evaluation")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.count(b'type="radio"'), 20)
+        for field in (
+            b"understands_output",
+            b"feels_in_control",
+            b"trusts_appropriately",
+            b"feedback_easy",
+        ):
+            self.assertEqual(response.data.count(b'name="' + field + b'"'), 5)
+        self.assertNotIn(b'type="number"', response.data)
+
     def test_explanation_segmenter_does_not_cache_listing_text(self):
         self.assertFalse(hasattr(marketplace_app.split_explanation_segments, "cache_info"))
 
@@ -267,8 +281,78 @@ class MarketplaceAppTests(unittest.TestCase):
             "/api/analyze",
             json={"text": "x" * (marketplace_app.MAX_TEXT_LENGTH + 1)},
         )
-
         self.assertEqual(response.status_code, 400)
+
+    def test_usefulness_feedback_is_persisted(self):
+        mock_classifier = lambda *args, **kwargs: {
+            "labels": marketplace_app.CANDIDATE_LABELS,
+            "scores": [0.55, 0.2, 0.1, 0.1, 0.1, 0.15, 0.1],
+        }
+        with patch.object(marketplace_app, "get_classifier", return_value=mock_classifier):
+            queued = self.client.post("/api/analyze", json={"text": "A listing."})
+            job_id = queued.json["job_id"]
+            self.client.get(f"/api/analyze/{job_id}")
+            response = self.client.post(
+                f"/api/analyze/{job_id}/feedback",
+                json={"feedback": "helpful"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        with sqlite3.connect(marketplace_app.REVIEW_DB_PATH) as connection:
+            record = connection.execute(
+                "SELECT analysis_job_id, feedback_value FROM usefulness_feedback"
+            ).fetchone()
+        self.assertEqual(record, (job_id, "helpful"))
+
+    def test_usability_response_validation_and_summary(self):
+        invalid = self.client.post(
+            "/api/evaluation",
+            json={
+                "understands_output": 5,
+                "feels_in_control": 4,
+                "trusts_appropriately": 3,
+                "feedback_easy": 5,
+                "consent_acknowledged": False,
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+        valid = self.client.post(
+            "/api/evaluation",
+            json={
+                "participant_id": "P1",
+                "scenario_id": "S1",
+                "understands_output": 5,
+                "feels_in_control": 4,
+                "trusts_appropriately": 3,
+                "feedback_easy": 5,
+                "comments": "Clear explanation.",
+                "consent_acknowledged": True,
+            },
+        )
+        self.assertEqual(valid.status_code, 201)
+        summary = self.client.get("/api/evaluation/summary")
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.json["response_count"], 1)
+        self.assertEqual(summary.json["averages"]["understands_output"], 5)
+
+    def test_evaluation_csv_export(self):
+        self.client.post(
+            "/api/evaluation",
+            json={
+                "participant_id": "P1",
+                "understands_output": 4,
+                "feels_in_control": 4,
+                "trusts_appropriately": 3,
+                "feedback_easy": 5,
+                "consent_acknowledged": True,
+            },
+        )
+        response = self.client.get("/api/evaluation/export.csv")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "text/csv")
+        self.assertIn(b"participant_id", response.data)
+        self.assertIn(b"P1", response.data)
 
 
 if __name__ == "__main__":

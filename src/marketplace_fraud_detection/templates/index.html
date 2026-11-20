@@ -7,28 +7,23 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="/">Marketplace Check</a>
+        <div class="nav-links">
+          <a class="active" href="/analysis" aria-current="page">Analysis</a>
+          <a href="/evaluation">Evaluation</a>
+          <a href="/study-summary">Study summary</a>
+          <a href="/transparency">Transparency</a>
+        </div>
+      </nav>
+    </header>
     <main>
       <p class="eyebrow">Human-reviewed risk signal</p>
       <h1>Marketplace Listing Check</h1>
       <p class="intro">Review a listing for possible warning signs. The tool supports your judgement; it does not make decisions about listings.</p>
-      <p class="privacy-note">Listing text is processed locally and not written to disk. Human review decisions are saved in a local database; this demo has no reviewer authentication. Avoid entering personal information.</p>
-      <details class="transparency">
-        <summary>Transparency and data use</summary>
-        <dl class="transparency-facts">
-          <dt>Model</dt>
-          <dd><code>{{ model_id }}</code>, a general-purpose zero-shot classifier. It is not specifically trained for marketplace fraud. Model weights may download from Hugging Face on first use; listing text is processed by this app locally.</dd>
-          <dt>Decision policy</dt>
-          <dd>Scores at or below {{ review_lower_percent }} are labeled likely legitimate; scores above {{ review_lower_percent }} and below {{ review_upper_percent }} require human review; scores at or above {{ fraud_threshold_percent }} are flagged as potentially fraudulent. These thresholds are provisional, not validated or calibrated.</dd>
-          <dt>Explanation</dt>
-          <dd>The Explain result button reruns the same classifier with up to three text excerpts omitted and compares scores. This is a local sensitivity check, not access to the model's internal reasoning or proof of causation.</dd>
-          <dt>Data and retention</dt>
-          <dd>The app does not write listing submissions to disk or send them to a remote inference API. Text is held in server memory while an asynchronous job runs. Its job record expires after {{ job_retention_minutes }} minutes and is removed on the next request; if no later request arrives, it can remain in memory longer until the app restarts. The input limit is {{ input_limit }} characters.</dd>
-          <dt>Human control</dt>
-          <dd>The app never removes a listing. A reviewer can confirm the warning, mark the listing legitimate, or escalate it. The selected outcome, model result, timestamp, and optional reviewer ID and rationale are saved in a local SQLite database. The listing text is not included. This demo has no login or reviewer authentication; stored decisions do not automatically retrain the model.</dd>
-          <dt>Limitations</dt>
-          <dd>The score is not a probability or accuracy measure. This prototype has not been validated for accuracy, fairness, or robustness on representative marketplace data.</dd>
-        </dl>
-      </details>
+      <p class="model-name">Model: <code>{{ model_id }}</code></p>
+      <p class="privacy-note">Listing text is processed locally and not written to disk; it is held in server memory while the analysis job runs. Human review decisions are saved in a local database; this demo has no reviewer authentication. Avoid entering personal information. <a href="/transparency">Transparency and data use</a></p>
       <form id="listing-form">
         <label for="listing-text">Listing text</label>
         <textarea id="listing-text" name="text" maxlength="5000" required
@@ -96,7 +91,7 @@
             <button type="button" class="secondary-button" data-feedback="helpful">Yes</button>
             <button type="button" class="secondary-button" data-feedback="not-helpful">No</button>
           </div>
-          <p class="feedback-note">Feedback stays in this page, is not saved, and does not retrain the model.</p>
+          <p class="feedback-note">Feedback is stored only as an anonymous usefulness response tied to this analysis job. It does not retrain the model.</p>
           <p id="feedback-status" role="status" aria-live="polite"></p>
         </div>
       </section>
@@ -168,11 +163,29 @@
       });
 
       document.querySelectorAll("[data-feedback]").forEach((button) => {
-        button.addEventListener("click", () => {
-          feedbackStatus.textContent = "Thanks. Your response is visible only in this page session.";
+        button.addEventListener("click", async () => {
+          if (!currentJobId) return;
           document.querySelectorAll("[data-feedback]").forEach((option) => {
             option.disabled = true;
           });
+          feedbackStatus.textContent = "Saving feedback...";
+          try {
+            const response = await fetch(
+              `/api/analyze/${encodeURIComponent(currentJobId)}/feedback`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ feedback: button.dataset.feedback })
+              }
+            );
+            const data = await readJsonResponse(response);
+            if (!response.ok) {
+              throw new Error(data.error || "Feedback could not be saved.");
+            }
+            feedbackStatus.textContent = "Thanks. Your response was saved locally.";
+          } catch (error) {
+            feedbackStatus.textContent = error.message;
+          }
         });
       });
 

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Participant Evaluation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="/">Marketplace Check</a>
+        <div class="nav-links">
+          <a href="/analysis">Analysis</a>
+          <a class="active" href="/evaluation" aria-current="page">Evaluation</a>
+          <a href="/study-summary">Study summary</a>
+          <a href="/transparency">Transparency</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Usability study</p>
+      <h1>Participant Evaluation</h1>
+      <p class="intro">Use this for a 3–5 participant study. Obtain informed consent before participants enter a response.</p>
+
+      <form id="evaluation-form" class="evaluation-form">
+        <label for="participant-id">Participant ID (optional pseudonym)</label>
+        <input id="participant-id" name="participant_id" maxlength="80" autocomplete="off">
+        <label for="scenario-id">Scenario ID (optional)</label>
+        <input id="scenario-id" name="scenario_id" maxlength="80" autocomplete="off">
+        <fieldset class="rating-fieldset">
+          <legend>I understand what the AI is doing</legend>
+          <div class="rating-options">
+            {% for value in range(1, 6) %}
+            <label class="rating-option">
+              <input type="radio" name="understands_output" value="{{ value }}" required>
+              <span>{{ value }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset class="rating-fieldset">
+          <legend>I feel in control of the final decision</legend>
+          <div class="rating-options">
+            {% for value in range(1, 6) %}
+            <label class="rating-option">
+              <input type="radio" name="feels_in_control" value="{{ value }}" required>
+              <span>{{ value }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset class="rating-fieldset">
+          <legend>I know when to trust or question the result</legend>
+          <div class="rating-options">
+            {% for value in range(1, 6) %}
+            <label class="rating-option">
+              <input type="radio" name="trusts_appropriately" value="{{ value }}" required>
+              <span>{{ value }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset class="rating-fieldset">
+          <legend>Giving feedback is easy</legend>
+          <div class="rating-options">
+            {% for value in range(1, 6) %}
+            <label class="rating-option">
+              <input type="radio" name="feedback_easy" value="{{ value }}" required>
+              <span>{{ value }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <label for="evaluation-comments">Comments (optional, max 1000 characters)</label>
+        <textarea id="evaluation-comments" name="comments" maxlength="1000" rows="3"></textarea>
+        <label class="consent-label">
+          <input id="evaluation-consent" name="consent_acknowledged" type="checkbox" required>
+          I confirm informed consent was obtained and this response may be stored locally.
+        </label>
+        <button type="submit" id="record-evaluation-button">Record participant response</button>
+      </form>
+      <p id="evaluation-status" role="status" aria-live="polite"></p>
+      <div class="actions">
+        <a class="export-link" href="/api/evaluation/export.csv">Download usability CSV</a>
+        <a class="export-link" href="/api/reviews/export.csv">Download human-review CSV</a>
+      </div>
+    </main>
+    <script>
+      const form = document.querySelector("#evaluation-form");
+      const button = document.querySelector("#record-evaluation-button");
+      const status = document.querySelector("#evaluation-status");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const raw = Object.fromEntries(new FormData(form));
+        button.disabled = true;
+        status.textContent = "Saving participant response...";
+        try {
+          const response = await fetch("/api/evaluation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              participant_id: raw.participant_id,
+              scenario_id: raw.scenario_id,
+              understands_output: Number(raw.understands_output),
+              feels_in_control: Number(raw.feels_in_control),
+              trusts_appropriately: Number(raw.trusts_appropriately),
+              feedback_easy: Number(raw.feedback_easy),
+              comments: raw.comments,
+              consent_acknowledged: document.querySelector("#evaluation-consent").checked
+            })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Participant response could not be saved.");
+          status.textContent = `Participant response recorded. Response ID: ${data.response_id}.`;
+          form.reset();
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Study Summary</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="/">Marketplace Check</a>
+        <div class="nav-links">
+          <a href="/analysis">Analysis</a>
+          <a href="/evaluation">Evaluation</a>
+          <a class="active" href="/study-summary" aria-current="page">Study summary</a>
+          <a href="/transparency">Transparency</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Collected evidence</p>
+      <h1>Study Summary</h1>
+      <p id="summary-status" class="intro" role="status" aria-live="polite">Loading study summary...</p>
+
+      <section class="metric-grid" aria-label="Study totals">
+        <article class="metric-card">
+          <span class="metric-value" id="response-count">—</span>
+          <span class="metric-label">Participant responses</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-value" id="helpful-count">—</span>
+          <span class="metric-label">Helpful feedback</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-value" id="not-helpful-count">—</span>
+          <span class="metric-label">Not-helpful feedback</span>
+        </article>
+      </section>
+
+      <section class="chart-section" aria-labelledby="ratings-title">
+        <h2 id="ratings-title">Average usability ratings</h2>
+        <p class="explanation-note">Scale from 1 to 5. Bars show the mean of recorded consented responses.</p>
+        <div id="ratings-chart" class="bar-chart"></div>
+      </section>
+
+      <section class="chart-section" aria-labelledby="feedback-title">
+        <h2 id="feedback-title">Usefulness feedback</h2>
+        <div id="feedback-chart" class="bar-chart"></div>
+      </section>
+
+      <div class="actions">
+        <a class="export-link" href="/api/evaluation/export.csv">Download usability CSV</a>
+        <a class="export-link" href="/api/reviews/export.csv">Download human-review CSV</a>
+      </div>
+    </main>
+    <script>
+      const labels = {
+        understands_output: "Understanding",
+        feels_in_control: "Control",
+        trusts_appropriately: "Appropriate trust",
+        feedback_easy: "Feedback ease"
+      };
+
+      function addBar(container, label, value, maximum) {
+        const row = document.createElement("div");
+        row.className = "bar-row";
+
+        const name = document.createElement("span");
+        name.className = "bar-name";
+        name.textContent = label;
+
+        const track = document.createElement("div");
+        track.className = "bar-track";
+
+        const fill = document.createElement("div");
+        fill.className = "bar-fill";
+        fill.style.width = value === null ? "0%" : `${(value / maximum) * 100}%`;
+
+        const valueLabel = document.createElement("span");
+        valueLabel.className = "bar-value";
+        valueLabel.textContent = value === null ? "No data" : value.toFixed(2);
+
+        track.appendChild(fill);
+        row.append(name, track, valueLabel);
+        container.appendChild(row);
+      }
+
+      async function loadSummary() {
+        const status = document.querySelector("#summary-status");
+        try {
+          const response = await fetch("/api/evaluation/summary");
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Summary could not be loaded.");
+
+          document.querySelector("#response-count").textContent = data.response_count;
+          document.querySelector("#helpful-count").textContent = data.usefulness_feedback.helpful;
+          document.querySelector("#not-helpful-count").textContent = data.usefulness_feedback["not-helpful"];
+          status.textContent = `${data.response_count} participant response${data.response_count === 1 ? "" : "s"} recorded.`;
+
+          const ratingsChart = document.querySelector("#ratings-chart");
+          ratingsChart.replaceChildren();
+          Object.entries(labels).forEach(([key, label]) => {
+            addBar(ratingsChart, label, data.averages[key], 5);
+          });
+
+          const feedbackChart = document.querySelector("#feedback-chart");
+          feedbackChart.replaceChildren();
+          const helpful = data.usefulness_feedback.helpful;
+          const notHelpful = data.usefulness_feedback["not-helpful"];
+          const feedbackMax = Math.max(helpful, notHelpful, 1);
+          addBar(feedbackChart, "Helpful", helpful, feedbackMax);
+          addBar(feedbackChart, "Not helpful", notHelpful, feedbackMax);
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      }
+
+      loadSummary();
+    </script>
+  </body>
+</html>

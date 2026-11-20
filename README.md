@@ -1,5 +1,19 @@
 # Marketplace Fraud Detection
 
+## Project structure
+
+- `app.py` — backward-compatible local development entry point.
+- `src/marketplace_fraud_detection/` — installable Python package.
+- `src/marketplace_fraud_detection/config.py` — environment settings and constants.
+- `src/marketplace_fraud_detection/routes/` — Flask HTTP blueprints.
+- `src/marketplace_fraud_detection/services/` — model and asynchronous job services.
+- `src/marketplace_fraud_detection/repositories/` — SQLite persistence.
+- `src/marketplace_fraud_detection/templates/` and `static/` — browser interface.
+- `tests/` — API and behavior tests.
+
+Install the package in a virtual environment with
+`python -m pip install -e .`, then run `python app.py`.
+
 ## Run the text analysis app
 
 The Flask app classifies a pasted listing description with the smaller Hugging
@@ -38,7 +52,17 @@ in `instance/review_decisions.sqlite3`; raw listing text is not included. Set
 `REVIEW_DB_PATH` to choose another local database path. The demo has no login or
 reviewer authentication, so do not use it for real cases or sensitive
 identifiers. Review records do not automatically retrain the model. The
-separate Yes/No usefulness feedback remains in the browser page only.
+separate Yes/No usefulness feedback is saved locally with the analysis job ID.
+
+The prototype also includes a participant evaluation form for 3–5 user or
+representative participants. It requests informed consent and records ratings
+for understanding, perceived control, appropriate trust, and feedback ease.
+Use pseudonymous participant IDs rather than names. `GET /api/evaluation/summary`
+returns aggregate results, while `GET /api/evaluation/export.csv` downloads the
+study responses and `GET /api/reviews/export.csv` downloads recorded human
+decisions. These exports do not include listing text. Participant responses and
+review decisions are prototype evidence only; recruiting and obtaining informed
+consent remain a researcher responsibility.
 
 Listing text is processed locally, not written to disk, and held in server
 memory while its async job runs. Job records expire after 15 minutes and are
